@@ -2,6 +2,19 @@
 
 A simple Neovim plugin for managing markdown notes and todos with Telescope integration.
 
+<a href="https://codeberg.org/lbartoletti/notes.nvim">
+    <img alt="Get it on Codeberg" src="https://get-it-on.codeberg.org/get-it-on-blue-on-white.png" height="60" align="right">
+</a>
+
+> [!NOTE]
+> 
+> **The canonical repository is hosted on [Codeberg](https://codeberg.org/lbartoletti/notes.nvim), which contains the official issue tracker and where development primarily occurs.**
+>
+> **Read-write mirror:** GitHub — pull requests are accepted here and synchronized back to Codeberg.
+>
+> Codeberg remains the authoritative source of truth for the project.
+
+
 ## Features
 
 - Create, delete, and list markdown notes
