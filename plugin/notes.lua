@@ -1,5 +1,4 @@
---- Plugin entry point for notes.nvim
---- Registers user commands (auto-loaded on startup)
+--- Registers the :Note user command
 
 -- Guard against double-loading
 if vim.g.loaded_notes then
@@ -12,7 +11,6 @@ vim.api.nvim_create_user_command("Note", function(opts)
   local subcommand = opts.fargs[1]
   local args = vim.list_slice(opts.fargs, 2)
 
-  -- Lazy load the plugin only when command is used
   local notes = require("notes")
 
   if subcommand == "new" then
@@ -22,47 +20,34 @@ vim.api.nvim_create_user_command("Note", function(opts)
   elseif subcommand == "list" then
     notes.show_list()
   elseif subcommand == "find" then
-    -- Try to use Telescope, fall back to list if not available
-    local has_telescope, telescope = pcall(require, "telescope")
-    if has_telescope then
-      telescope.extensions.notes.notes()
-    else
-      notes.show_list()
-    end
+    require("notes.picker").notes()
+  elseif subcommand == "grep" then
+    require("notes.picker").grep()
   else
     vim.notify(
-      "Unknown subcommand: " .. subcommand .. "\nAvailable: new, delete, list, find",
+      "Unknown subcommand: " .. subcommand .. "\nAvailable: new, delete, list, find, grep",
       vim.log.levels.ERROR
     )
   end
 end, {
   nargs = "+",
-  desc = "Manage notes and todos",
-  complete = function(arg_lead, cmdline, cursor_pos)
-    local subcommands = { "new", "delete", "list", "find" }
-
-    -- Parse current arguments
+  desc  = "Manage notes and todos",
+  complete = function(arg_lead, cmdline, _)
+    local subcommands = { "new", "delete", "list", "find", "grep" }
     local args = vim.split(cmdline, "%s+")
-    local num_args = #args - 1 -- Exclude command name
+    local num_args = #args - 1
 
-    -- First argument: complete subcommands
     if num_args == 1 then
-      return vim.tbl_filter(function(cmd)
-        return vim.startswith(cmd, arg_lead)
-      end, subcommands)
+      return vim.tbl_filter(function(c) return vim.startswith(c, arg_lead) end, subcommands)
     end
 
-    -- Second argument for delete: complete note names
     if num_args == 2 and args[2] == "delete" then
-      local notes = require("notes")
-      local note_paths = notes.list_notes()
-      local note_names = {}
-      for _, path in ipairs(note_paths) do
-        table.insert(note_names, notes.get_filename(path))
+      local note_paths = require("notes").list_notes()
+      local names = {}
+      for _, p in ipairs(note_paths) do
+        table.insert(names, require("notes").get_filename(p))
       end
-      return vim.tbl_filter(function(name)
-        return vim.startswith(name, arg_lead)
-      end, note_names)
+      return vim.tbl_filter(function(n) return vim.startswith(n, arg_lead) end, names)
     end
 
     return {}

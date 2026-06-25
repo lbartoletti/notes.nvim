@@ -1,5 +1,4 @@
---- Configuration module for notes.nvim
---- Handles user configuration and provides sensible defaults
+--- Configuration with sensible defaults
 local M = {}
 
 --- Default configuration options
@@ -9,12 +8,14 @@ local M = {}
 --- @field scope "personal"|"project"|"auto" Default scope for new notes
 --- @field file_extension string File extension for notes (default: .md)
 --- @field confirm_delete boolean Confirm before deleting notes
+--- @field picker "snacks"|"telescope"|"fzf-lua"|"builtin"|nil Picker backend (nil = auto-detect)
 M.defaults = {
   personal_notes_dir = vim.fn.stdpath("data") .. "/notes",
-  project_notes_dir = ".notes",
-  scope = "personal",
-  file_extension = ".md",
-  confirm_delete = true,
+  project_notes_dir  = ".notes",
+  scope              = "personal",
+  file_extension     = ".md",
+  confirm_delete     = true,
+  picker             = nil, -- auto-detect: snacks > telescope > fzf-lua > builtin
 }
 
 --- Current options (merged with user config)

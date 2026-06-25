@@ -1,8 +1,6 @@
---- Main module for notes.nvim
---- Core functionality for managing notes
+--- Core note operations (pure Lua + Vim API, no dependencies)
 local M = {}
 local config = require("notes.config")
-local Path = require("plenary.path")
 
 --- Setup the plugin with user configuration
 --- @param opts NotesConfig|nil User configuration
@@ -14,15 +12,18 @@ end
 --- @param name string Raw filename
 --- @return string Sanitized filename
 local function sanitize_filename(name)
-  -- Remove path separators and dangerous characters
   name = name:gsub("[/\\]+", "-")
-  -- Replace spaces and special chars with dash
   name = name:gsub("[^%w%s%-_]", "-")
-  -- Collapse multiple dashes
   name = name:gsub("%-+", "-")
-  -- Trim dashes from ends
   name = name:gsub("^%-+", ""):gsub("%-+$", "")
   return name
+end
+
+--- Check if a path exists on the filesystem
+--- @param path string
+--- @return boolean
+local function path_exists(path)
+  return vim.uv.fs_stat(path) ~= nil
 end
 
 --- Check if current directory is inside a git repository
@@ -43,43 +44,25 @@ function M.get_notes_dir(opts)
   if scope == "project" then
     return vim.fn.getcwd() .. "/" .. config.options.project_notes_dir
   elseif scope == "auto" then
-    -- Auto mode: use project dir if in git repo, otherwise personal
     if is_git_repo() then
       return vim.fn.getcwd() .. "/" .. config.options.project_notes_dir
     else
       return config.options.personal_notes_dir
     end
   else
-    -- Default to personal
     return config.options.personal_notes_dir
   end
 end
 
---- List all notes in the specified directory
+--- List all markdown notes in the specified directory (recursive)
 --- @param opts {scope?: "personal"|"project"|"auto"} Options
 --- @return string[] Array of absolute file paths
 function M.list_notes(opts)
   local notes_dir = M.get_notes_dir(opts)
-  local path = Path:new(notes_dir)
-
-  if not path:exists() then
+  if not path_exists(notes_dir) then
     return {}
   end
-
-  local notes = {}
-  local scan = require("plenary.scandir")
-
-  scan.scan_dir(notes_dir, {
-    hidden = false,
-    add_dirs = false,
-    respect_gitignore = true,
-    search_pattern = ".*%.md$",
-    on_insert = function(entry)
-      table.insert(notes, entry)
-    end,
-  })
-
-  return notes
+  return vim.fn.glob(notes_dir .. "/**/*.md", false, true)
 end
 
 --- Get filename from path
@@ -102,7 +85,6 @@ function M.new_note(name, opts)
   config.ensure_setup()
   opts = opts or {}
 
-  -- Prompt for name if not provided
   if not name or name == "" then
     name = vim.fn.input("Note name: ")
     if name == "" then
@@ -111,40 +93,35 @@ function M.new_note(name, opts)
     end
   end
 
-  -- Sanitize and add extension
   name = sanitize_filename(name)
   if not name:match("%.md$") then
     name = name .. config.options.file_extension
   end
 
   local notes_dir = M.get_notes_dir(opts)
-  local dir_path = Path:new(notes_dir)
 
-  -- Create directory if it doesn't exist
-  if not dir_path:exists() then
-    dir_path:mkdir({ parents = true, exists_ok = true })
+  if not path_exists(notes_dir) then
+    vim.fn.mkdir(notes_dir, "p")
   end
 
-  local file_path = Path:new(notes_dir, name)
+  local file_path = notes_dir .. "/" .. name
 
-  -- Check if file already exists
-  if file_path:exists() then
+  if path_exists(file_path) then
     vim.notify("Note already exists: " .. name, vim.log.levels.WARN)
-    M.open_note(file_path:absolute())
+    M.open_note(file_path)
     return
   end
 
-  -- Create empty file
-  file_path:touch({ parents = true })
+  local f = io.open(file_path, "w")
+  if f then f:close() end
 
-  -- Open in buffer
-  M.open_note(file_path:absolute())
-
+  M.open_note(file_path)
   vim.notify("Created note: " .. name, vim.log.levels.INFO)
 end
 
 --- Delete a note
 --- @param path string|nil Absolute path to note or filename
+--- @param opts {scope?: "personal"|"project"|"auto"}|nil Options
 function M.delete_note(path, opts)
   config.ensure_setup()
 
@@ -153,31 +130,25 @@ function M.delete_note(path, opts)
     return
   end
 
-  -- If it's just a filename (no path separators), search in notes directory
   if not path:match("[/\\]") then
     local notes_dir = M.get_notes_dir(opts)
     path = notes_dir .. "/" .. path
   end
 
-  local file_path = Path:new(path)
-
-  if not file_path:exists() then
+  if not path_exists(path) then
     vim.notify("Note does not exist: " .. path, vim.log.levels.ERROR)
     return
   end
 
   local filename = M.get_filename(path)
 
-  -- Confirm deletion
   if config.options.confirm_delete then
     vim.ui.input({
       prompt = "Delete note '" .. filename .. "'? [y/N]: ",
     }, function(input)
       if input and (input:lower() == "y" or input:lower() == "yes") then
-        file_path:rm()
+        vim.fn.delete(path)
         vim.notify("Deleted note: " .. filename, vim.log.levels.INFO)
-
-        -- Close buffer if it's open
         local bufnr = vim.fn.bufnr(path)
         if bufnr ~= -1 then
           vim.api.nvim_buf_delete(bufnr, { force = true })
@@ -187,12 +158,12 @@ function M.delete_note(path, opts)
       end
     end)
   else
-    file_path:rm()
+    vim.fn.delete(path)
     vim.notify("Deleted note: " .. filename, vim.log.levels.INFO)
   end
 end
 
---- Show a simple list of notes using vim.ui.select
+--- Show a simple list of notes using vim.ui.select (fallback when no picker available)
 --- @param opts {scope?: "personal"|"project"|"auto"} Options
 function M.show_list(opts)
   local notes = M.list_notes(opts)
@@ -202,7 +173,6 @@ function M.show_list(opts)
     return
   end
 
-  -- Extract filenames for display
   local items = {}
   for _, note_path in ipairs(notes) do
     table.insert(items, M.get_filename(note_path))

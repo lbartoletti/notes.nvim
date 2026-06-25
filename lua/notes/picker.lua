@@ -1,177 +1,94 @@
---- Telescope picker integration for notes.nvim
---- Provides fuzzy finding, preview, deletion, and creation
+--- Multi-picker integration (snacks > telescope > fzf-lua > builtin)
 local M = {}
 
---- Main notes picker
---- @param opts table|nil Telescope picker options
-function M.notes(opts)
-  -- Check if Telescope is available
-  local has_telescope, telescope = pcall(require, "telescope")
-  if not has_telescope then
-    vim.notify("Telescope not found. Use :Note list instead.", vim.log.levels.ERROR)
-    return
+--- Detect the best available picker
+--- @return string One of: "snacks", "telescope", "fzf-lua", "builtin"
+local function detect_picker()
+  local config = require("notes.config")
+  -- Honour explicit user preference
+  if config.options.picker then
+    return config.options.picker
   end
+  -- Auto-detect
+  if pcall(require, "snacks") and Snacks and Snacks.picker then
+    return "snacks"
+  end
+  if pcall(require, "telescope") then
+    return "telescope"
+  end
+  if pcall(require, "fzf-lua") then
+    return "fzf-lua"
+  end
+  return "builtin"
+end
 
-  local pickers = require("telescope.pickers")
-  local finders = require("telescope.finders")
-  local conf = require("telescope.config").values
-  local actions = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
-  local previewers = require("telescope.previewers")
-
-  local notes = require("notes")
-
+--- Open a picker to browse and open notes
+--- @param opts {scope?: "personal"|"project"|"auto", title?: string}|nil
+function M.notes(opts)
   opts = opts or {}
-  local note_paths = notes.list_notes(opts)
+  local notes   = require("notes")
+  local dir     = notes.get_notes_dir(opts)
+  local title   = opts.title or "Notes"
+  local picker  = detect_picker()
 
-  pickers
-    .new(opts, {
-      prompt_title = "Notes",
-      finder = finders.new_table({
-        results = note_paths,
-        entry_maker = function(entry)
-          return {
-            value = entry,
-            display = notes.get_filename(entry),
-            ordinal = notes.get_filename(entry),
-            path = entry,
-          }
-        end,
-      }),
-      sorter = conf.generic_sorter(opts),
-      previewer = previewers.new_buffer_previewer({
-        title = "Note Preview",
-        define_preview = function(self, entry, status)
-          conf.buffer_previewer_maker(entry.path, self.state.bufnr, {
-            bufname = self.state.bufname,
-            winid = self.state.winid,
-          })
-        end,
-      }),
-      attach_mappings = function(prompt_bufnr, map)
-        -- Default action: open note
-        actions.select_default:replace(function()
-          local selection = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          if selection then
-            notes.open_note(selection.value)
-          end
-        end)
-
-        -- <C-d>: Delete note
-        map("i", "<C-d>", function()
-          local selection = action_state.get_selected_entry()
-          if not selection then
-            return
-          end
-
-          local current_picker = action_state.get_current_picker(prompt_bufnr)
-          local filename = notes.get_filename(selection.value)
-
-          vim.ui.input({
-            prompt = "Delete note '" .. filename .. "'? [y/N]: ",
-          }, function(input)
-            if input and (input:lower() == "y" or input:lower() == "yes") then
-              local Path = require("plenary.path")
-              local file_path = Path:new(selection.value)
-              file_path:rm()
-
-              vim.notify("Deleted note: " .. filename, vim.log.levels.INFO)
-
-              -- Close buffer if open
-              local bufnr = vim.fn.bufnr(selection.value)
-              if bufnr ~= -1 then
-                vim.api.nvim_buf_delete(bufnr, { force = true })
-              end
-
-              -- Refresh picker
-              current_picker:refresh(finders.new_table({
-                results = notes.list_notes(opts),
-                entry_maker = function(entry)
-                  return {
-                    value = entry,
-                    display = notes.get_filename(entry),
-                    ordinal = notes.get_filename(entry),
-                    path = entry,
-                  }
-                end,
-              }), { reset_prompt = false })
-            end
-          end)
-        end)
-
-        map("n", "<C-d>", function()
-          local selection = action_state.get_selected_entry()
-          if not selection then
-            return
-          end
-
-          local current_picker = action_state.get_current_picker(prompt_bufnr)
-          local filename = notes.get_filename(selection.value)
-
-          vim.ui.input({
-            prompt = "Delete note '" .. filename .. "'? [y/N]: ",
-          }, function(input)
-            if input and (input:lower() == "y" or input:lower() == "yes") then
-              local Path = require("plenary.path")
-              local file_path = Path:new(selection.value)
-              file_path:rm()
-
-              vim.notify("Deleted note: " .. filename, vim.log.levels.INFO)
-
-              -- Close buffer if open
-              local bufnr = vim.fn.bufnr(selection.value)
-              if bufnr ~= -1 then
-                vim.api.nvim_buf_delete(bufnr, { force = true })
-              end
-
-              -- Refresh picker
-              current_picker:refresh(finders.new_table({
-                results = notes.list_notes(opts),
-                entry_maker = function(entry)
-                  return {
-                    value = entry,
-                    display = notes.get_filename(entry),
-                    ordinal = notes.get_filename(entry),
-                    path = entry,
-                  }
-                end,
-              }), { reset_prompt = false })
-            end
-          end)
-        end)
-
-        -- <C-n>: Create new note with current query
-        map("i", "<C-n>", function()
-          local current_picker = action_state.get_current_picker(prompt_bufnr)
-          local query = current_picker:_get_prompt()
-
-          actions.close(prompt_bufnr)
-
-          if query and query ~= "" then
-            notes.new_note(query, opts)
-          else
-            notes.new_note(nil, opts)
-          end
-        end)
-
-        map("n", "<C-n>", function()
-          local current_picker = action_state.get_current_picker(prompt_bufnr)
-          local query = current_picker:_get_prompt()
-
-          actions.close(prompt_bufnr)
-
-          if query and query ~= "" then
-            notes.new_note(query, opts)
-          else
-            notes.new_note(nil, opts)
-          end
-        end)
-
-        return true
-      end,
+  if picker == "snacks" then
+    Snacks.picker.files({
+      title = title,
+      cwd   = dir,
     })
-    :find()
+
+  elseif picker == "telescope" then
+    require("telescope.builtin").find_files({
+      cwd           = dir,
+      prompt_title  = title,
+    })
+
+  elseif picker == "fzf-lua" then
+    require("fzf-lua").files({
+      cwd    = dir,
+      prompt = title .. "> ",
+      actions = {
+        ["default"] = function(selected)
+          if selected and selected[1] then
+            -- fzf-lua returns filenames relative to cwd
+            notes.open_note(dir .. "/" .. selected[1])
+          end
+        end,
+      },
+    })
+
+  else
+    notes.show_list(opts)
+  end
+end
+
+--- Open a picker to full-text search notes
+--- @param opts {scope?: "personal"|"project"|"auto", title?: string}|nil
+function M.grep(opts)
+  opts = opts or {}
+  local notes  = require("notes")
+  local dir    = notes.get_notes_dir(opts)
+  local title  = opts.title or "Search Notes"
+  local picker = detect_picker()
+
+  if picker == "snacks" then
+    Snacks.picker.grep({
+      title = title,
+      cwd   = dir,
+    })
+
+  elseif picker == "telescope" then
+    require("telescope.builtin").live_grep({
+      cwd           = dir,
+      prompt_title  = title,
+    })
+
+  elseif picker == "fzf-lua" then
+    require("fzf-lua").live_grep({ cwd = dir })
+
+  else
+    vim.notify("No fuzzy finder available for grep. Use :vimgrep instead.", vim.log.levels.WARN)
+  end
 end
 
 return M
